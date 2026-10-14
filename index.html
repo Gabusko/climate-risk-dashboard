@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Climate-Risk Dashboard | Colombia to the Netherlands</title>
+<meta name="description" content="Prototype: one shared view of climate risk from Colombian Hass avocado regions to Dutch ripening operations." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/topojson/3.0.2/topojson.min.js"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        fontFamily: {
+          display: ['"Bricolage Grotesque"', 'system-ui', 'sans-serif'],
+          sans: ['"IBM Plex Sans"', 'system-ui', 'sans-serif'],
+        },
+        colors: {
+          paper: 'var(--paper)', surface: 'var(--surface)', ink: 'var(--ink)',
+          muted: 'var(--muted)', line: 'var(--line)', brand: 'var(--brand)',
+          earth: 'var(--earth)', frame: 'var(--frame)', frameink: 'var(--frame-ink)',
+          framemuted: 'var(--frame-muted)', frameline: 'var(--frame-line)',
+          high: 'var(--high)', med: 'var(--med)', low: 'var(--low)', unk: 'var(--unk)',
+        },
+      },
+    },
+  };
+</script>
+<style>
+  :root {
+    color-scheme: light;
+    --paper: #EEF1E7; --surface: #FFFFFF; --ink: #1D2B24; --muted: #56665D;
+    --line: #D3DACB; --brand: #1F4D3A; --earth: #8B6B45;
+    --frame: #143329; --frame-ink: #EAF0E6; --frame-muted: #A9BCB1; --frame-line: #2C4C40;
+    --high: #C23B2B; --med: #B97A06; --low: #2F7D45; --unk: #7C8781;
+    --phone: #F4F5F1; --bubble-in: #FFFFFF; --bubble-out: #1F4D3A; --bubble-out-ink: #FFFFFF;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --paper: #0F1814; --surface: #17231D; --ink: #E5EBE2; --muted: #9DAEA4;
+      --line: #2A3B32; --brand: #84C2A0; --earth: #CFAE85;
+      --frame: #0B1511; --frame-ink: #E5EBE2; --frame-muted: #93A79B; --frame-line: #22362C;
+      --high: #F0705C; --med: #F0B640; --low: #6DC283; --unk: #95A099;
+      --phone: #101914; --bubble-in: #1F2D26; --bubble-out: #2E6A50; --bubble-out-ink: #F2F6F0;
+    }
+  }
+  body { background: var(--paper); color: var(--ink); }
+  .tint-high { background: color-mix(in srgb, var(--high) 12%, transparent); }
+  .tint-med  { background: color-mix(in srgb, var(--med) 14%, transparent); }
+  .tint-low  { background: color-mix(in srgb, var(--low) 12%, transparent); }
+  .tint-unk  { background: color-mix(in srgb, var(--unk) 14%, transparent); }
+  :focus-visible { outline: 3px solid var(--med); outline-offset: 2px; border-radius: 6px; }
+  .region[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--brand); }
+  @keyframes travel { from { transform: translateX(-6px); opacity: 0; } to { transform: none; opacity: 1; } }
+  .marker { animation: travel .9s ease-out both; }
+  @keyframes pop { from { transform: translateY(6px); opacity: 0; } to { transform: none; opacity: 1; } }
+  .msg-new { animation: pop .35s ease-out both; }
+  :root { --sea: #0E241D; --land: #1C3A2F; --land-focus: #2E6450; --land-line: #3B6152; }
+  @media (prefers-color-scheme: dark) {
+    :root { --sea: #08110D; --land: #14251D; --land-focus: #244A3A; --land-line: #2C4438; }
+  }
+  .ripple { transform-box: fill-box; transform-origin: center; animation: ripple 1.8s ease-out infinite; pointer-events: none; }
+  @keyframes ripple { from { transform: scale(1); opacity: .9; } to { transform: scale(3.2); opacity: 0; } }
+  .hot { outline: none; }
+  .hot:focus-visible .dotc { stroke: var(--med); stroke-width: 3; }
+  @media (prefers-reduced-motion: reduce) { .marker, .msg-new, .ripple { animation: none; } }
+</style>
+</head>
+<body class="font-sans antialiased">
+
+<!-- Top bar -->
+<header class="border-b border-line">
+  <div class="max-w-6xl mx-auto px-5 py-3 flex items-center justify-between gap-4">
+    <div class="flex items-center gap-2.5">
+      <svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true">
+        <path d="M13 2c5 4 8 9 8 13.5A8 8 0 0 1 5 15.5C5 11 8 6 13 2z" fill="var(--brand)"/>
+        <circle cx="13" cy="16" r="3.4" fill="var(--earth)"/>
+      </svg>
+      <span class="font-display font-bold text-[17px] tracking-tight">Climate-Risk Dashboard</span>
+    </div>
+    <span class="text-xs text-muted border border-line rounded-full px-3 py-1">Prototype with illustrative data</span>
+  </div>
+</header>
+
+<!-- Hero + supply corridor -->
+<section class="bg-frame text-frameink">
+  <div class="max-w-6xl mx-auto px-5 pt-10 pb-8 md:pt-14">
+    <h1 class="font-display font-bold text-[2rem] leading-[1.08] md:text-[3.1rem] tracking-tight max-w-3xl">
+      One shared view of climate risk from Colombian growing regions to Dutch ripening operations.
+    </h1>
+    <p class="mt-4 text-framemuted max-w-2xl text-[15px] md:text-base leading-relaxed">
+      For Nature's Pride, Colombian Hass exporters and the farmers who supply them. Risk follows each shipment, so a landslide warning in Antioquia shows up in Maasdijk's ripening plan.
+    </p>
+
+    <!-- Corridor -->
+    <div class="mt-10" aria-label="Supply corridor with shipments in transit">
+      <div class="flex items-baseline justify-between mb-3">
+        <h2 class="font-display font-medium text-lg">Shipments on the corridor</h2>
+        <span class="text-xs text-framemuted">Updated 13 Oct 2026, 07:00 Colombia time</span>
+      </div>
+      <div class="relative hidden md:block h-28">
+        <div class="absolute left-0 right-0 top-[54px] h-[3px] rounded bg-frameline"></div>
+        <div id="stops"></div>
+        <div id="markers"></div>
+      </div>
+      <!-- Mobile list -->
+      <ul id="shipList" class="md:hidden space-y-2"></ul>
+    </div>
+  </div>
+</section>
+
+<main class="max-w-6xl mx-auto px-5 py-10 space-y-12">
+
+  <!-- Risk map -->
+  <section class="bg-frame text-frameink rounded-2xl overflow-hidden border border-frameline shadow-xl" aria-labelledby="map-h">
+    <div class="flex flex-wrap items-center justify-between gap-3 px-5 py-4 border-b border-frameline">
+      <div>
+        <h2 id="map-h" class="font-display font-bold text-xl md:text-2xl tracking-tight">Risk map</h2>
+        <p class="text-sm text-framemuted">Hass growing regions in Colombia, next 7 days. Select a hotspot to inspect it.</p>
+      </div>
+      <span class="text-xs text-framemuted">Updated 13 Oct 2026, 07:00</span>
+    </div>
+
+    <div class="grid lg:grid-cols-[170px_minmax(0,0.75fr)_minmax(0,1.25fr)]">
+      <div class="px-5 py-5 border-b lg:border-b-0 lg:border-r border-frameline">
+        <p class="text-sm font-semibold mb-3">Risk level</p>
+        <ul id="legend" class="space-y-2.5 text-sm"></ul>
+        <ul class="mt-5 pt-4 border-t border-frameline space-y-2.5 text-sm">
+          <li class="flex items-center gap-2"><i class="w-2.5 h-2.5 bg-frameink"></i>Export port</li>
+          <li class="flex items-center gap-2"><i class="w-4 border-t-2 border-dashed border-med"></i>Route to Rotterdam</li>
+        </ul>
+        <p class="text-xs text-framemuted mt-5 leading-relaxed">Hotspots combine IDEAM warnings, recent rainfall and seasonal outlooks, reviewed by agronomists.</p>
+      </div>
+
+      <div class="p-4 border-b lg:border-b-0 lg:border-r border-frameline" style="background:var(--sea)">
+        <p class="text-xs text-framemuted">South America</p>
+        <svg id="saMap" viewBox="0 0 360 440" class="w-full h-auto max-h-[460px] mx-auto" role="img" aria-label="Map of South America with Colombia highlighted, risk hotspots and the export route toward Rotterdam"></svg>
+      </div>
+
+      <div class="relative p-4" style="background:var(--sea)">
+        <p class="text-xs text-framemuted">Colombia, Hass growing regions</p>
+        <svg id="coMap" viewBox="0 0 480 520" class="w-full h-auto" aria-label="Zoomed map of Colombia with selectable risk hotspots"></svg>
+        <p id="mapErr" class="hidden text-sm text-framemuted py-10 text-center">The map needs an internet connection to load. The rest of the dashboard still works.</p>
+        <div id="popup" class="mt-3 sm:mt-0 sm:absolute sm:bottom-4 sm:right-4 sm:w-[240px] bg-surface text-ink rounded-xl shadow-2xl border border-line p-4" aria-live="polite"></div>
+      </div>
+    </div>
+
+    <div id="mapTiles" class="grid grid-cols-2 md:grid-cols-4 gap-px bg-frameline border-t border-frameline"></div>
+  </section>
+
+  <!-- Dashboard grid -->
+  <div class="grid lg:grid-cols-3 gap-6">
+
+    <!-- Regional risk tracker -->
+    <section class="lg:col-span-2 space-y-5" aria-labelledby="tracker-h">
+      <div class="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 id="tracker-h" class="font-display font-bold text-2xl tracking-tight">Regional risk tracker</h2>
+          <p class="text-sm text-muted mt-1">Hass growing regions, next 7 days. Select a region to see its detail.</p>
+        </div>
+        <div class="flex gap-3 text-xs text-muted" aria-hidden="true">
+          <span class="flex items-center gap-1.5"><i class="w-2.5 h-2.5 rounded-full bg-high"></i>High</span>
+          <span class="flex items-center gap-1.5"><i class="w-2.5 h-2.5 rounded-full bg-med"></i>Medium</span>
+          <span class="flex items-center gap-1.5"><i class="w-2.5 h-2.5 rounded-full bg-low"></i>Low</span>
+          <span class="flex items-center gap-1.5"><i class="w-2.5 h-2.5 rounded-full bg-unk"></i>Unknown</span>
+        </div>
+      </div>
+
+      <div id="regions" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3"></div>
+
+      <!-- Region detail -->
+      <article id="detail" class="bg-surface border border-line rounded-2xl p-5 md:p-6" aria-live="polite"></article>
+    </section>
+
+    <!-- Right column -->
+    <aside class="space-y-6">
+      <section class="bg-surface border border-line rounded-2xl p-5" aria-labelledby="alerts-h">
+        <div class="flex items-center justify-between">
+          <h2 id="alerts-h" class="font-display font-bold text-xl tracking-tight">Active alerts</h2>
+          <span class="text-xs font-semibold text-high tint-high rounded-full px-2.5 py-0.5">4 open</span>
+        </div>
+        <ul id="alerts" class="mt-4 space-y-3"></ul>
+      </section>
+
+      <section class="bg-surface border border-line rounded-xl p-5" aria-labelledby="ins-h">
+        <h2 id="ins-h" class="font-display font-bold text-xl tracking-tight">What to adjust this week</h2>
+        <p class="text-sm text-muted mt-1">Expected Colombian supply in containers, with the share exposed to open alerts.</p>
+        <div id="bars" class="mt-4 flex items-end gap-3 h-32" role="img" aria-label="Weeks 43 to 46: 12, 12, 11 and 12 containers planned; 2, 4, 3 and 1 exposed to alerts."></div>
+        <ul class="mt-5 space-y-3 text-sm">
+          <li class="flex gap-3"><span class="mt-1.5 w-1.5 h-1.5 rounded-full bg-brand shrink-0"></span><span><strong class="font-semibold">Move 2 week-44 containers</strong> from Antioquia (Oriente) to Valle del Cauca suppliers, subject to exporter confirmation.</span></li>
+          <li class="flex gap-3"><span class="mt-1.5 w-1.5 h-1.5 rounded-full bg-brand shrink-0"></span><span><strong class="font-semibold">Book an extra arrival inspection</strong> for NP-CO-2609, harvested during heavy rain.</span></li>
+          <li class="flex gap-3"><span class="mt-1.5 w-1.5 h-1.5 rounded-full bg-brand shrink-0"></span><span><strong class="font-semibold">Keep ripening-room slack</strong> for a possible 3-day arrival delay in week 45.</span></li>
+        </ul>
+      </section>
+    </aside>
+  </div>
+
+  <!-- Farmer SMS -->
+  <section class="grid md:grid-cols-2 gap-8 md:gap-12 items-center" aria-labelledby="sms-h">
+    <div class="max-w-md">
+      <h2 id="sms-h" class="font-display font-bold text-2xl md:text-3xl tracking-tight">How farmers get the same warning</h2>
+      <p class="mt-3 text-muted leading-relaxed">
+        No app or smartphone needed. Farmers receive a Spanish text message and reply with one number. Their replies come back to the dashboard, so buyers and exporters see what is happening on the ground.
+      </p>
+      <p class="mt-3 text-muted leading-relaxed">
+        Try it: tap a reply on the phone. Support requests start a verified assessment; they do not trigger automatic payouts, loans or supplier exclusion.
+      </p>
+      <dl class="mt-6 grid grid-cols-3 gap-3 text-center">
+        <div class="bg-surface border border-line rounded-lg p-3"><dt class="text-xs text-muted">Alerts sent</dt><dd class="font-display font-bold text-2xl mt-1">48</dd></div>
+        <div class="bg-surface border border-line rounded-lg p-3"><dt class="text-xs text-muted">Confirmed</dt><dd class="font-display font-bold text-2xl mt-1" id="cntOk">41</dd></div>
+        <div class="bg-surface border border-line rounded-lg p-3"><dt class="text-xs text-muted">Asked for support</dt><dd class="font-display font-bold text-2xl mt-1" id="cntHelp">6</dd></div>
+      </dl>
+      <p class="text-xs text-muted mt-2">Antioquia (Oriente) landslide alert, illustrative figures.</p>
+    </div>
+
+    <!-- Phone -->
+    <div class="flex justify-center">
+      <div class="w-[300px] rounded-[2.4rem] border-[10px] border-[#1b2420] shadow-2xl overflow-hidden" style="background:var(--phone)">
+        <div class="px-4 pt-3 pb-2 border-b border-line flex items-center gap-2.5">
+          <div class="w-8 h-8 rounded-full bg-brand grid place-items-center text-[11px] font-semibold" style="color:var(--surface)">AC</div>
+          <div class="leading-tight">
+            <p class="text-sm font-semibold">Alerta Clima Hass</p>
+            <p class="text-[11px] text-muted">SMS</p>
+          </div>
+        </div>
+        <div id="thread" class="px-3 py-4 space-y-3 h-[380px] overflow-y-auto text-[13px] leading-snug"></div>
+        <div class="px-3 pb-4 pt-2 border-t border-line">
+          <p class="text-[11px] text-muted mb-2">Responder</p>
+          <div class="grid grid-cols-3 gap-2" id="replies">
+            <button data-r="1" class="rounded-lg border border-line bg-surface py-2 text-sm font-semibold hover:border-brand">1 Recibido</button>
+            <button data-r="2" class="rounded-lg border border-line bg-surface py-2 text-sm font-semibold hover:border-brand">2 Apoyo</button>
+            <button data-r="3" class="rounded-lg border border-line bg-surface py-2 text-sm font-semibold hover:border-brand">3 Agrónomo</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="border-t border-line">
+  <div class="max-w-6xl mx-auto px-5 py-8 text-xs text-muted leading-relaxed space-y-2 max-w-3xl md:max-w-6xl">
+    <p><span class="font-semibold text-ink">Data sources in the full concept:</span> IDEAM daily landslide-threat bulletins, NASA POWER recent conditions (2–3 day delay), Copernicus seasonal forecasts (monthly), NOAA CPC ENSO outlooks, plus supplier harvest, temperature and arrival-inspection records.</p>
+    <p>All regions, shipments, figures and messages on this page are illustrative for a student pitch. Risk scores would be reviewed by agronomists, and missing data is shown as unknown rather than guessed. Not every flood or landslide is caused by El Niño.</p>
+  </div>
+</footer>
+
+<script>
+  const REGIONS = [
+    { id:'ant', name:'Antioquia', sub:'Oriente', level:'high', hazard:'Landslides', conf:'High',
+      stats:{ rain:'+45%', slide:'High', temp:'+0.8 °C', outlook:'−18%' },
+      note:'IDEAM bulletin rates landslide threat high for the next 3 days. Saturated slopes after 9 days of above-normal rain.',
+      source:'IDEAM bulletin, 13 Oct 06:00' },
+    { id:'cal', name:'Caldas', sub:'Centro-sur', level:'med', hazard:'Heavy rain', conf:'Medium',
+      stats:{ rain:'+30%', slide:'Moderate', temp:'+0.5 °C', outlook:'−6%' },
+      note:'Rainfall well above normal; harvest windows may shorten and fruit may arrive with higher moisture.',
+      source:'NASA POWER, 10 Oct' },
+    { id:'ris', name:'Risaralda', sub:'Belén de Umbría', level:'med', hazard:'Heavy rain', conf:'Medium',
+      stats:{ rain:'+22%', slide:'Moderate', temp:'+0.4 °C', outlook:'−4%' },
+      note:'Moderate rain risk. Watch road access to packhouses.',
+      source:'NASA POWER, 10 Oct' },
+    { id:'tol', name:'Tolima', sub:'Norte', level:'med', hazard:'Dry spell outlook', conf:'Low',
+      stats:{ rain:'−25%', slide:'Low', temp:'+1.2 °C', outlook:'−8%' },
+      note:'Seasonal outlook leans drier for Nov–Jan. Plan irrigation without over-watering.',
+      source:'Copernicus seasonal, Oct issue' },
+    { id:'qui', name:'Quindío', sub:'Cordillera', level:'low', hazard:'None significant', conf:'High',
+      stats:{ rain:'+5%', slide:'Low', temp:'+0.3 °C', outlook:'0%' },
+      note:'Conditions close to normal.', source:'NASA POWER, 10 Oct' },
+    { id:'val', name:'Valle del Cauca', sub:'Norte', level:'low', hazard:'None significant', conf:'High',
+      stats:{ rain:'−3%', slide:'Low', temp:'+0.2 °C', outlook:'+2%' },
+      note:'Stable outlook. A candidate to absorb volume shifted from higher-risk regions.',
+      source:'NASA POWER, 10 Oct' },
+    { id:'cau', name:'Cauca', sub:'Meseta', level:'unk', hazard:'Data delayed', conf:'—',
+      stats:{ rain:'Unknown', slide:'Unknown', temp:'Unknown', outlook:'Unknown' },
+      note:'No recent station or satellite reading. Shown as unknown instead of estimated until data arrives.',
+      source:'Last reading 7 Oct' },
+  ];
+  const LABEL = { high:'High risk', med:'Medium risk', low:'Low risk', unk:'Unknown' };
+
+  const STOPS = [
+    { p:0, t:'Farms', s:'Colombia' },
+    { p:25, t:'Port', s:'Cartagena' },
+    { p:50, t:'At sea', s:'2–3 weeks' },
+    { p:75, t:'Rotterdam', s:'Arrival check' },
+    { p:100, t:'Ripening', s:'Maasdijk' },
+  ];
+  const SHIPS = [
+    { id:'NP-CO-2617', region:'tol', p:6,  stage:'Pre-harvest', eta:'14 Nov' },
+    { id:'NP-CO-2614', region:'ant', p:16, stage:'Packhouse', eta:'7 Nov' },
+    { id:'NP-CO-2609', region:'ant', p:46, stage:'At sea', eta:'27 Oct' },
+    { id:'NP-CO-2602', region:'cal', p:64, stage:'At sea', eta:'21 Oct' },
+    { id:'NP-CO-2597', region:'val', p:84, stage:'Rotterdam', eta:'16 Oct' },
+  ];
+  const ALERTS = [
+    { level:'high', title:'High landslide risk', when:'Next 3 days', where:'Antioquia (Oriente)', ships:2 },
+    { level:'med', title:'Heavy rainfall', when:'Next 5 days', where:'Caldas, Risaralda', ships:1 },
+    { level:'med', title:'Drier-than-normal outlook', when:'Nov – Jan', where:'Tolima', ships:1 },
+    { level:'unk', title:'Climate data delayed', when:'Since 7 Oct', where:'Cauca', ships:0 },
+  ];
+  const regionOf = id => REGIONS.find(r => r.id === id);
+  const dot = l => `<i class="inline-block w-2.5 h-2.5 rounded-full bg-${l} shrink-0"></i>`;
+
+  // Corridor
+  document.getElementById('stops').innerHTML = STOPS.map(s => `
+    <div class="absolute top-0 -translate-x-1/2 text-center" style="left:${s.p === 0 ? '1.5%' : s.p === 100 ? '98.5%' : s.p + '%'}">
+      <p class="text-sm font-semibold whitespace-nowrap">${s.t}</p>
+      <p class="text-[11px] text-framemuted whitespace-nowrap">${s.s}</p>
+      <span class="block mx-auto mt-[14px] w-3.5 h-3.5 rounded-full border-2 border-frameink" style="background:var(--frame)"></span>
+    </div>`).join('');
+  document.getElementById('markers').innerHTML = SHIPS.map((s, i) => {
+    const r = regionOf(s.region);
+    return `<div class="marker absolute top-[72px] -translate-x-1/2 text-center" style="left:${s.p}%; animation-delay:${i * 120}ms">
+      <span class="block mx-auto -mt-[25px] w-3 h-3 rotate-45 bg-${r.level}"></span>
+      <p class="mt-2 text-[11px] font-semibold whitespace-nowrap">${s.id}</p>
+      <p class="text-[10px] text-framemuted whitespace-nowrap">${r.name}</p>
+    </div>`;
+  }).join('');
+  document.getElementById('shipList').innerHTML = SHIPS.map(s => {
+    const r = regionOf(s.region);
+    return `<li class="flex items-center justify-between gap-3 border border-frameline rounded-lg px-3 py-2.5">
+      <span class="flex items-center gap-2.5">${dot(r.level)}<span><span class="text-sm font-semibold">${s.id}</span><span class="block text-[11px] text-framemuted">${r.name}, ${s.stage}</span></span></span>
+      <span class="text-[11px] text-framemuted">Ripening ${s.eta}</span></li>`;
+  }).join('');
+
+  // Regions
+  let selected = 'ant';
+  const regionsEl = document.getElementById('regions');
+  function renderRegions() {
+    regionsEl.innerHTML = REGIONS.map(r => `
+      <button class="region text-left rounded-xl border border-line bg-surface p-3.5 hover:border-brand transition-colors" data-id="${r.id}" aria-pressed="${r.id === selected}">
+        <span class="block h-1.5 w-10 rounded-full bg-${r.level} mb-3"></span>
+        <span class="block font-semibold leading-tight">${r.name}</span>
+        <span class="block text-xs text-muted">${r.sub}</span>
+        <span class="mt-2.5 inline-flex items-center gap-1.5 text-xs font-semibold text-${r.level} tint-${r.level} rounded-full px-2 py-0.5">${LABEL[r.level]}</span>
+        <span class="block text-xs text-muted mt-1.5">${r.hazard}</span>
+      </button>`).join('');
+  }
+  function renderDetail() {
+    const r = regionOf(selected);
+    const ships = SHIPS.filter(s => s.region === r.id);
+    const tile = (k, v) => `<div class="rounded-lg border border-line p-3"><p class="text-xs text-muted">${k}</p><p class="font-display font-bold text-xl mt-0.5">${v}</p></div>`;
+    document.getElementById('detail').innerHTML = `
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 class="font-display font-bold text-xl">${r.name} <span class="text-muted font-medium">(${r.sub})</span></h3>
+          <p class="text-sm text-muted mt-0.5">Source: ${r.source}. Confidence: ${r.conf}</p>
+        </div>
+        <span class="inline-flex items-center gap-2 text-sm font-semibold text-${r.level} tint-${r.level} rounded-full px-3 py-1">${dot(r.level)}${LABEL[r.level]}</span>
+      </div>
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-5">
+        ${tile('Rainfall vs normal', r.stats.rain)}${tile('Landslide threat', r.stats.slide)}
+        ${tile('Temperature anomaly', r.stats.temp)}${tile('Harvest outlook', r.stats.outlook)}
+      </div>
+      <p class="mt-4 text-[15px] leading-relaxed max-w-prose">${r.note}</p>
+      <div class="mt-4 pt-4 border-t border-line text-sm">
+        <p class="font-semibold">Linked shipments</p>
+        ${ships.length ? `<ul class="mt-2 space-y-1.5">${ships.map(s => `<li class="flex justify-between gap-3"><span>${s.id}, ${s.stage.toLowerCase()}</span><span class="text-muted">Ripening ${s.eta}</span></li>`).join('')}</ul>`
+          : `<p class="text-muted mt-1">No Nature's Pride shipments from this region in the next 4 weeks.</p>`}
+      </div>`;
+  }
+  regionsEl.addEventListener('click', e => {
+    const b = e.target.closest('.region'); if (!b) return;
+    setSelected(b.dataset.id);
+  });
+  function setSelected(id) {
+    selected = id; renderRegions(); renderDetail(); renderMapState();
+  }
+  renderRegions(); renderDetail();
+
+  // Alerts
+  document.getElementById('alerts').innerHTML = ALERTS.map(a => `
+    <li class="rounded-xl tint-${a.level} p-3.5 border-l-4" style="border-color:var(--${a.level})">
+      <div class="flex justify-between gap-2"><p class="font-semibold text-[15px]">${a.title}</p><p class="text-xs font-semibold text-${a.level} whitespace-nowrap pt-0.5">${a.when}</p></div>
+      <p class="text-sm text-muted mt-0.5">${a.where}</p>
+      <p class="text-xs text-muted mt-1.5">${a.ships ? a.ships + ' linked shipment' + (a.ships > 1 ? 's' : '') : 'Shown as unknown until data arrives'}</p>
+    </li>`).join('');
+
+  // Supply bars
+  const WEEKS = [['W43',12,2],['W44',12,4],['W45',11,3],['W46',12,1]];
+  document.getElementById('bars').innerHTML = WEEKS.map(([w, tot, risk]) => `
+    <div class="flex-1 flex flex-col items-center justify-end h-full">
+      <span class="text-xs text-high font-semibold mb-1">${risk}</span>
+      <div class="w-full max-w-[44px] rounded-md overflow-hidden flex flex-col" style="height:${tot / 12 * 82}%">
+        <div class="bg-high" style="height:${risk / tot * 100}%"></div>
+        <div class="bg-brand flex-1"></div>
+      </div>
+      <span class="text-xs text-muted mt-1.5">${w}</span>
+    </div>`).join('') ;
+
+  // SMS thread
+  const thread = document.getElementById('thread');
+  function bubble(dir, es, en, isNew) {
+    const out = dir === 'out';
+    const el = document.createElement('div');
+    el.className = `flex ${out ? 'justify-end' : 'justify-start'} ${isNew ? 'msg-new' : ''}`;
+    el.innerHTML = `<div class="max-w-[85%]">
+      <div class="rounded-2xl px-3.5 py-2.5 ${out ? 'rounded-br-md' : 'rounded-bl-md border border-line'}" style="background:var(${out ? '--bubble-out' : '--bubble-in'});${out ? 'color:var(--bubble-out-ink)' : ''}">${es}</div>
+      <p class="text-[10.5px] text-muted mt-1 px-1 ${out ? 'text-right' : ''}">${en}</p></div>`;
+    thread.appendChild(el); thread.scrollTop = thread.scrollHeight;
+  }
+  bubble('in',
+    '<strong>ALERTA:</strong> Riesgo ALTO de deslizamiento en el Oriente antioqueño, próximos 3 días. Revise drenajes y evite cosechar en laderas inestables.<br><br>Responda 1 si recibió, 2 si necesita apoyo, 3 para hablar con un agrónomo.',
+    'High landslide risk in eastern Antioquia, next 3 days. Check drainage, avoid harvesting on unstable slopes. Reply 1, 2 or 3.');
+  const RESP = {
+    '1': ['1', 'Recibido', 'Gracias. Le enviaremos una actualización mañana a las 6:00.', 'Thanks. Next update tomorrow at 6:00.', 'cntOk'],
+    '2': ['2', 'Need support', 'Su reporte quedó registrado para verificación. La cooperativa le contactará en 24 horas para evaluar el apoyo.', 'Report logged for verification. The cooperative will contact you within 24 hours to assess support.', 'cntHelp'],
+    '3': ['3', 'Talk to an agronomist', 'Un agrónomo le llamará hoy antes de las 17:00.', 'An agronomist will call you today before 17:00.', null],
+  };
+  document.getElementById('replies').addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    const [es, en, rEs, rEn, counter] = RESP[b.dataset.r];
+    bubble('out', es, en, true);
+    if (counter) { const c = document.getElementById(counter); c.textContent = +c.textContent + 1; }
+    setTimeout(() => bubble('in', rEs, rEn, true), 600);
+  });
+
+  // ---------- Risk map ----------
+  const MAP = {
+    ant: { c:[-75.40, 6.10], h:['Heavy rainfall, 70% probability in the next 5 days', 'Landslide threat high (IDEAM bulletin)', 'Harvest disruption possible, 14–20 Oct'] },
+    cal: { c:[-75.45, 5.35], h:['Rainfall 30% above normal', 'Shorter harvest windows', 'Higher fruit moisture at packing'] },
+    ris: { c:[-75.87, 5.20], h:['Rainfall 22% above normal', 'Road access to packhouses at risk'] },
+    tol: { c:[-75.02, 5.15], h:['Drier outlook for Nov–Jan (seasonal forecast)', 'Plan irrigation without over-watering'] },
+    qui: { c:[-75.65, 4.45], h:['Conditions close to normal'] },
+    val: { c:[-76.20, 4.60], h:['Stable outlook', 'Can absorb volume shifted from higher-risk regions'] },
+    cau: { c:[-76.60, 2.60], h:['No reading since 7 Oct', 'Shown as unknown, not estimated'] },
+  };
+  const BBOX = [[-79.5, 0.5], [-68, 11.5]];
+  const PORT = { name:'Cartagena port', c:[-75.51, 10.39] };
+  const LEVEL_NAME = { high:'High', med:'Medium', low:'Low', unk:'Unknown' };
+  let coProj = null, coDots = null;
+
+  document.getElementById('legend').innerHTML = ['high','med','low','unk'].map(l => `
+    <li class="flex items-center justify-between gap-2">
+      <span class="flex items-center gap-2">${dot(l)}${LEVEL_NAME[l]}</span>
+      <span class="text-framemuted">${REGIONS.filter(r => r.level === l).length}</span>
+    </li>`).join('');
+
+  const popup = document.getElementById('popup');
+  popup.addEventListener('click', e => {
+    if (e.target.closest('#viewDetails')) document.getElementById('detail').scrollIntoView({ behavior:'smooth', block:'center' });
+  });
+
+  function renderMapState() {
+    const r = regionOf(selected), m = MAP[selected];
+    popup.innerHTML = `
+      <p class="font-semibold leading-tight">${r.name}</p>
+      <p class="text-xs text-muted">Hass avocado, ${r.sub}</p>
+      <span class="mt-2.5 inline-flex items-center gap-2 text-sm font-semibold text-${r.level} tint-${r.level} rounded-full px-2.5 py-0.5">${dot(r.level)}${LABEL[r.level]}</span>
+      <ul class="mt-3 space-y-2 text-[13px] leading-snug">
+        ${m.h.map(x => `<li class="flex gap-2"><span class="mt-1.5 w-1.5 h-1.5 rounded-full bg-${r.level} shrink-0"></span><span>${x}</span></li>`).join('')}
+      </ul>
+      <button id="viewDetails" class="mt-4 w-full rounded-lg bg-brand py-2 text-sm font-semibold" style="color:var(--surface)">View details</button>`;
+
+    const tile = (k, v) => `<div class="bg-frame px-5 py-4"><p class="text-xs text-framemuted">${k}</p><p class="font-display font-bold text-2xl mt-1">${v}</p></div>`;
+    document.getElementById('mapTiles').innerHTML =
+      tile('Rainfall vs normal', r.stats.rain) + tile('Landslide threat', r.stats.slide) +
+      tile('Temperature anomaly', r.stats.temp) + tile('Harvest outlook', r.stats.outlook);
+
+    if (coDots) drawDots();
+  }
+
+  function addGlow(svg, prefix) {
+    const defs = svg.append('defs');
+    ['high','med','low'].forEach(l => {
+      const g = defs.append('radialGradient').attr('id', `${prefix}-${l}`);
+      g.append('stop').attr('offset','0%').attr('style', `stop-color:var(--${l});stop-opacity:.85`);
+      g.append('stop').attr('offset','55%').attr('style', `stop-color:var(--${l});stop-opacity:.35`);
+      g.append('stop').attr('offset','100%').attr('style', `stop-color:var(--${l});stop-opacity:0`);
+    });
+  }
+  function addHeat(svg, proj, prefix, r) {
+    const g = svg.append('g');
+    REGIONS.filter(x => x.level !== 'unk').forEach(x => {
+      const [cx, cy] = proj(MAP[x.id].c);
+      g.append('circle').attr('cx', cx).attr('cy', cy)
+        .attr('r', r * (x.level === 'high' ? 1.35 : x.level === 'med' ? 1.1 : 0.9))
+        .attr('fill', `url(#${prefix}-${x.level})`);
+    });
+  }
+  function drawCountries(svg, path, countries) {
+    svg.append('g').selectAll('path').data(countries).join('path')
+      .attr('d', path)
+      .attr('fill', d => d.properties.name === 'Colombia' ? 'var(--land-focus)' : 'var(--land)')
+      .attr('stroke', 'var(--land-line)').attr('stroke-width', 0.7);
+  }
+  function label(svg, proj, txt, c, opts = {}) {
+    const [x, y] = proj(c);
+    svg.append('text').attr('x', x).attr('y', y).text(txt)
+      .attr('text-anchor', opts.anchor || 'start')
+      .attr('font-size', opts.size || 11).attr('font-weight', opts.weight || 400)
+      .attr('font-style', opts.italic ? 'italic' : null)
+      .attr('fill', opts.fill || 'var(--frame-muted)');
+  }
+
+  function drawDots() {
+    coDots.selectAll('*').remove();
+    REGIONS.forEach(r => {
+      const [x, y] = coProj(MAP[r.id].c);
+      const sel = r.id === selected;
+      const g = coDots.append('g').attr('class', 'hot').attr('tabindex', 0).attr('role', 'button')
+        .attr('aria-label', `${r.name}, ${LABEL[r.level]}`).attr('aria-pressed', sel).style('cursor', 'pointer')
+        .on('click', () => setSelected(r.id))
+        .on('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelected(r.id); } });
+      if (r.level === 'high') g.append('circle').attr('class', 'ripple').attr('cx', x).attr('cy', y).attr('r', 7)
+        .attr('fill', 'none').attr('stroke', 'var(--high)').attr('stroke-width', 2);
+      g.append('circle').attr('cx', x).attr('cy', y).attr('r', 15).attr('fill', 'transparent');
+      g.append('circle').attr('class', 'dotc').attr('cx', x).attr('cy', y).attr('r', sel ? 9 : 6)
+        .attr('fill', r.level === 'unk' ? 'var(--sea)' : `var(--${r.level})`)
+        .attr('stroke', r.level === 'unk' ? 'var(--unk)' : 'var(--frame-ink)')
+        .attr('stroke-width', sel ? 3 : 1.5).attr('stroke-dasharray', r.level === 'unk' ? '3 2' : null);
+      if (sel) g.append('text').attr('x', x - 15).attr('y', y + 4).attr('text-anchor', 'end')
+        .attr('font-size', 14).attr('font-weight', 600).attr('fill', 'var(--frame-ink)')
+        .attr('paint-order', 'stroke').attr('stroke', 'var(--sea)').attr('stroke-width', 5).attr('stroke-linejoin', 'round')
+        .text(r.name);
+    });
+  }
+
+  async function drawMaps() {
+    try {
+      if (!window.d3 || !window.topojson) throw new Error('Map libraries unavailable');
+      const world = await d3.json('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-50m.json');
+      const countries = topojson.feature(world, world.objects.countries).features;
+      const SA = ['Colombia','Venezuela','Ecuador','Peru','Brazil','Bolivia','Chile','Argentina','Paraguay','Uruguay','Guyana','Suriname'];
+      const saFeatures = countries.filter(f => SA.includes(f.properties.name));
+
+      // South America overview
+      const sa = d3.select('#saMap'); const W = 360, H = 440;
+      const saProj = d3.geoMercator().fitExtent([[14, 26], [W - 14, H - 6]], { type:'FeatureCollection', features: saFeatures });
+      addGlow(sa, 'sa');
+      drawCountries(sa, d3.geoPath(saProj), countries);
+      addHeat(sa, saProj, 'sa', 9);
+      const [bx0, by0] = saProj([BBOX[0][0], BBOX[1][1]]), [bx1, by1] = saProj([BBOX[1][0], BBOX[0][1]]);
+      sa.append('rect').attr('x', bx0).attr('y', by0).attr('width', bx1 - bx0).attr('height', by1 - by0)
+        .attr('fill', 'none').attr('stroke', 'var(--frame-ink)').attr('stroke-dasharray', '3 3').attr('opacity', .75);
+      const [px, py] = saProj(PORT.c);
+      sa.append('path').attr('d', `M${px},${py} Q${W * 0.72},${py - 34} ${W - 8},${18}`)
+        .attr('fill', 'none').attr('stroke', 'var(--med)').attr('stroke-width', 1.8).attr('stroke-dasharray', '5 4');
+      sa.append('text').attr('x', W - 8).attr('y', 12).attr('text-anchor', 'end').attr('font-size', 11).attr('font-weight', 600)
+        .attr('fill', 'var(--med)').text('To Rotterdam, 2–3 weeks');
+      label(sa, saProj, 'Colombia', [-73.2, 3.6], { anchor:'middle', size:11, weight:600, fill:'var(--frame-ink)' });
+      label(sa, saProj, 'Brazil', [-53, -10], { anchor:'middle', size:12 });
+      label(sa, saProj, 'Peru', [-75.2, -9.5], { anchor:'middle' });
+      label(sa, saProj, 'Argentina', [-65, -35], { anchor:'middle' });
+      label(sa, saProj, 'Pacific Ocean', [-88, -22], { anchor:'middle', italic:true });
+      label(sa, saProj, 'Atlantic Ocean', [-30, -25], { anchor:'middle', italic:true });
+
+      // Colombia zoom
+      const co = d3.select('#coMap');
+      coProj = d3.geoMercator().fitExtent([[0, 0], [480, 520]], { type:'MultiPoint', coordinates: BBOX });
+      addGlow(co, 'co');
+      drawCountries(co, d3.geoPath(coProj), countries);
+      label(co, coProj, 'Caribbean Sea', [-77.8, 11.0], { italic:true });
+      label(co, coProj, 'Pacific', [-79.2, 4.4], { italic:true });
+      label(co, coProj, 'Panama', [-79.3, 8.5]);
+      label(co, coProj, 'Ecuador', [-78.4, 0.85]);
+      label(co, coProj, 'Venezuela', [-69.6, 8.6], { anchor:'middle' });
+      label(co, coProj, 'Colombia', [-72.6, 6.6], { anchor:'middle', size:14, weight:600, fill:'var(--frame-ink)' });
+      addHeat(co, coProj, 'co', 34);
+      const [cx, cy] = coProj(PORT.c);
+      co.append('rect').attr('x', cx - 5).attr('y', cy - 5).attr('width', 10).attr('height', 10).attr('fill', 'var(--frame-ink)');
+      co.append('text').attr('x', cx + 10).attr('y', cy + 4).attr('font-size', 12).attr('font-weight', 600)
+        .attr('fill', 'var(--frame-ink)').text(PORT.name);
+      coDots = co.append('g');
+      drawDots();
+    } catch (err) {
+      document.getElementById('saMap').classList.add('hidden');
+      document.getElementById('coMap').classList.add('hidden');
+      document.getElementById('mapErr').classList.remove('hidden');
+    }
+  }
+  renderMapState();
+  drawMaps();
+</script>
+</body>
+</html>
